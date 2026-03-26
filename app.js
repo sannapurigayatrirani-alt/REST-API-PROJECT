@@ -6,29 +6,34 @@ const app=express();
 app.use(express.json());
 const dbPath=path.join(__dirname,'users.db');
 let db=null;
-const intializeDbAndServer=async()=>{
-    db=await open({
-        filename:dbPath,
-        driver:sqlite3.Database
-    })
 
-    
-    await db.run(`
-        CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL
-        );
-    `);
-    
-    app.listen(3001,()=>{
-        console.log('server is running at http://localhost:3001/');
-    })
+const initializeDbAndServer=async()=>{
+    try {
+        db=await open({
+            filename:dbPath,
+            driver:sqlite3.Database
+        })
+
+        await db.run(`
+            CREATE TABLE IF NOT EXISTS users(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE
+            );
+        `);
+        
+        app.listen(3001,()=>{
+            console.log('server is running at http://localhost:3001/');
+        })
+    } catch(error) {
+        console.error('Database initialization error:', error);
+        process.exit(1);
+    }
 }
-intializeDbAndServer();
+initializeDbAndServer();
 
 // GET all users with search and sort filters
-app.get('/users/',async(request,response)=>{
+app.get('/users',async(request,response)=>{
     const {search, sort, order = 'asc'} = request.query;
 
     let query = 'SELECT * FROM users';
@@ -60,6 +65,7 @@ app.get('/users/',async(request,response)=>{
         const users = await db.all(query, params);
         response.json(users);
     } catch (error) {
+        console.error('GET /users error:', error);
         response.status(500).json({error: 'Internal server error'});
     }
 })
@@ -82,12 +88,18 @@ app.get('/users/:id',async(request,response)=>{
 })
 
 // POST - Create new user
-app.post('/users/',async(request,response)=>{
+app.post('/users',async(request,response)=>{
     const {name,email} = request.body;
 
     // Basic validation
     if (!name || !email) {
         return response.status(400).json({error: 'Name and email are required'});
+    }
+
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return response.status(400).json({error: 'Invalid email format'});
     }
 
     try {
@@ -97,7 +109,8 @@ app.post('/users/',async(request,response)=>{
             userId: result.lastID
         });
     } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT') {
+        console.error('POST /users error:', error);
+        if (error.message.includes('UNIQUE constraint failed')) {
             response.status(400).json({error: 'Email already exists'});
         } else {
             response.status(500).json({error: 'Internal server error'});
@@ -115,6 +128,12 @@ app.put('/users/:id',async(request,response)=>{
         return response.status(400).json({error: 'Name and email are required'});
     }
 
+    // Email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return response.status(400).json({error: 'Invalid email format'});
+    }
+
     try {
         const result = await db.run('UPDATE users SET name = ?, email = ? WHERE id = ?',[name,email,id]);
 
@@ -124,7 +143,8 @@ app.put('/users/:id',async(request,response)=>{
 
         response.json({message: 'User updated successfully'});
     } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT') {
+        console.error('PUT /users/:id error:', error);
+        if (error.message.includes('UNIQUE constraint failed')) {
             response.status(400).json({error: 'Email already exists'});
         } else {
             response.status(500).json({error: 'Internal server error'});
@@ -145,6 +165,7 @@ app.delete('/users/:id',async(request,response)=>{
 
         response.json({message: 'User deleted successfully'});
     } catch (error) {
+        console.error('DELETE /users/:id error:', error);
         response.status(500).json({error: 'Internal server error'});
     }
 })
